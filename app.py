@@ -1,65 +1,79 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+import plotly.express as px
+import time
+from datetime import datetime
 
-# App Configuration
-st.set_page_config(page_title="Demon Back Tracker", page_icon="👹")
+st.set_page_config(page_title="Demon Back Pro", layout="centered")
 
-st.title("👹 Demon Back Progress Tracker")
-st.write(f"**Target Weight:** 72.5kg | **Goal:** 10% Body Fat")
+# --- DATA STORAGE ---
+if 'logs' not in st.session_state:
+    st.session_state.logs = pd.DataFrame(columns=["Date", "Split", "Exercise", "Weight", "Reps", "1RM"])
 
-# --- TAB 1: WORKOUT LOGGING ---
-tab1, tab2, tab3 = st.tabs(["🏋️ Workout", "🥗 Nutrition", "📈 Stats"])
+# --- SIDEBAR: TOOLS ---
+st.sidebar.title("👹 Demon Menu")
+current_split = st.sidebar.selectbox("Today's Session", [
+    "Rest Day", "Push (Chest/Tri/Shoulder)", "Pull (Back/Bi/Traps/Rear Delt)", 
+    "Legs", "Back & Chest (Heavy Volume)", "Arms"
+])
 
-with tab1:
-    st.header("Log Today's Lift")
-    workout_type = st.selectbox("Workout Focus", ["Heavy Pull (Demon Day)", "Rest Day"])
-    
-    if workout_type == "Heavy Pull (Demon Day)":
-        ex1 = st.number_input("Hammer Strength Low Row (kg)", min_value=0, step=1)
-        ex1_reps = st.number_input("Low Row Reps", min_value=0, step=1)
+# 1-REP MAX CALCULATOR (Brzycki Formula)
+st.sidebar.divider()
+st.sidebar.subheader("🧮 1-Rep Max Predictor")
+calc_w = st.sidebar.number_input("Weight Lifted", value=0.0, step=2.5)
+calc_r = st.sidebar.number_input("Reps Performed", value=0, step=1)
+if calc_r > 0:
+    one_rm = calc_w / (1.0278 - (0.0278 * calc_r))
+    st.sidebar.metric("Estimated 1RM", f"{round(one_rm, 1)} kg")
+
+# REST TIMER
+st.sidebar.divider()
+st.sidebar.subheader("⏲️ Rest Timer")
+t_input = st.sidebar.number_input("Seconds", value=60, step=5)
+if st.sidebar.button("Start Timer"):
+    msg = st.sidebar.empty()
+    for i in range(int(t_input), 0, -1):
+        msg.metric("Rest Remaining", f"{i}s")
+        time.sleep(1)
+    st.sidebar.success("GO! Next Set!")
+    st.balloons()
+
+# --- MAIN WORKOUT LOG ---
+st.header(f"🏋️ {current_split}")
+
+if current_split != "Rest Day":
+    with st.form("log_form", clear_on_submit=True):
+        c1, c2, c3 = st.columns(3)
+        ex = c1.text_input("Exercise")
+        wt = c2.number_input("Weight (kg)", step=1.25)
+        rp = c3.number_input("Reps", step=1)
         
-        ex2 = st.number_input("Barbell Row (kg)", min_value=0, step=1)
-        ex2_reps = st.number_input("Barbell Row Reps", min_value=0, step=1)
-        
-        ex3 = st.number_input("Wide Pull-ups (Total Reps)", min_value=0, step=1)
-        
-        if st.button("Save Workout"):
-            st.success(f"Log saved for {date.today()}! Beat these numbers next week.")
+        if st.form_submit_button("Log Set"):
+            # Calculate 1RM for this set
+            current_1rm = wt / (1.0278 - (0.0278 * rp)) if rp > 0 else 0
+            new_row = pd.DataFrame([[datetime.now().date(), current_split, ex, wt, rp, round(current_1rm, 1)]], 
+                                   columns=["Date", "Split", "Exercise", "Weight", "Reps", "1RM"])
+            st.session_state.logs = pd.concat([st.session_state.logs, new_row], ignore_index=True)
+            st.success(f"Set saved! Est. 1RM: {round(current_1rm, 1)}kg")
 
-# --- TAB 2: VEGETARIAN MACRO CHECK ---
-with tab2:
-    st.header("Daily Macro Counter")
-    st.info("Target: 160g Protein")
+# --- PROGRESS CHART ---
+if not st.session_state.logs.empty:
+    st.divider()
+    st.subheader("📈 Strength History")
+    all_ex = st.session_state.logs["Exercise"].unique()
+    target_ex = st.selectbox("Select Exercise to Track", all_ex)
     
-    soya = st.checkbox("Soya Chunks (Lunch Swap)")
-    tofu = st.checkbox("Woolworths High Protein Tofu")
-    whey = st.number_input("Whey Protein Scoops", 0, 4, 2)
-    paneer = st.slider("Paneer (grams)", 0, 400, 150)
-    
-    # Simple calculation logic
-    protein_total = (whey * 25) + (paneer * 0.18)
-    if soya: protein_total += 50
-    if tofu: protein_total += 38
-    
-    st.metric("Total Protein Tracked", f"{int(protein_total)}g")
-    
-    if protein_total >= 160:
-        st.balloons()
-        st.write("✅ Demon Growth Activated!")
+    chart_data = st.session_state.logs[st.session_state.logs["Exercise"] == target_ex]
+    fig = px.line(chart_data, x="Date", y="1RM", markers=True, title=f"{target_ex} (Estimated 1RM Over Time)")
+    st.plotly_chart(fig, use_container_width=True)
 
-# --- TAB 3: REST DAY RULES ---
-with tab3:
-    st.header("Rest Day Discipline")
-    is_rest_day = st.toggle("Is today a Rest Day?")
-    
-    if is_rest_day:
-        st.warning("⚠️ REST DAY RULES: Half rice at lunch, NO rice at dinner.")
-        water = st.slider("Water Intake (Liters)", 0.0, 5.0, 3.5)
-        if water >= 3.5:
-            st.write("💧 Hydration perfect for skin thinning.")
-    else:
-        st.write("🔥 Training Day: Eat your rice and lift heavy!")
-
+# --- NUTRITION ---
 st.divider()
-st.caption("Custom Built for Gemini User | 176cm | 72.5kg")
+st.subheader("🥗 Daily Protein (Target: 160g)")
+p_items = st.multiselect("Check what you ate:", ["Whey (25g)", "Tofu (38g)", "Soya (50g)", "Paneer (28g)"])
+current_p = sum([int(i.split('(')[1].replace('g)', '')) for i in p_items])
+st.progress(min(current_p/160, 1.0))
+st.write(f"Total: {current_p}g / 160g")
+
+if current_split == "Rest Day":
+    st.warning("⚠️ REMINDER: Half rice at lunch, NO rice at dinner.")
